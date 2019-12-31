@@ -32,7 +32,10 @@ MODEL_PATH = FLAGS.model_path
 GPU_INDEX = FLAGS.gpu
 MODEL = importlib.import_module(FLAGS.model) # import network module
 DUMP_DIR = FLAGS.dump_dir
-if not os.path.exists(DUMP_DIR): os.mkdir(DUMP_DIR)
+
+if not os.path.exists(DUMP_DIR):
+    os.mkdir(DUMP_DIR)
+
 LOG_FOUT = open(os.path.join(DUMP_DIR, 'log_evaluate.txt'), 'w')
 LOG_FOUT.write(str(FLAGS)+'\n')
 

@@ -2,94 +2,52 @@ import tensorflow as tf
 import numpy as np
 import sys
 import os
+from tensorflow.keras.layers import Dense, Reshape, GlobalMaxPooling1D
+from tensorflow.keras.initializers import Constant
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(BASE_DIR, '../utils'))
-import tf_util
-
-def input_transform_net(point_cloud, is_training, bn_decay=None, K=3):
-    """ Input (XYZ) Transform Net, input is BxNx3 gray image
-        Return:
-            Transformation matrix of size 3xK """
-    batch_size = point_cloud.get_shape()[0].value
-    num_point = point_cloud.get_shape()[1].value
-
-    input_image = tf.expand_dims(point_cloud, -1)
-    net = tf_util.conv2d(input_image, 64, [1,3],
-                         padding='VALID', stride=[1,1],
-                         bn=True, is_training=is_training,
-                         scope='tconv1', bn_decay=bn_decay)
-    net = tf_util.conv2d(net, 128, [1,1],
-                         padding='VALID', stride=[1,1],
-                         bn=True, is_training=is_training,
-                         scope='tconv2', bn_decay=bn_decay)
-    net = tf_util.conv2d(net, 1024, [1,1],
-                         padding='VALID', stride=[1,1],
-                         bn=True, is_training=is_training,
-                         scope='tconv3', bn_decay=bn_decay)
-    net = tf_util.max_pool2d(net, [num_point,1],
-                             padding='VALID', scope='tmaxpool')
-
-    net = tf.reshape(net, [batch_size, -1])
-    net = tf_util.fully_connected(net, 512, bn=True, is_training=is_training,
-                                  scope='tfc1', bn_decay=bn_decay)
-    net = tf_util.fully_connected(net, 256, bn=True, is_training=is_training,
-                                  scope='tfc2', bn_decay=bn_decay)
-
-    with tf.compat.v1.variable_scope('transform_XYZ') as sc:
-        assert(K==3)
-        weights = tf.compat.v1.get_variable('weights', [256, 3*K],
-                                  initializer=tf.compat.v1.constant_initializer(0.0),
-                                  dtype=tf.float32)
-        biases = tf.compat.v1.get_variable('biases', [3*K],
-                                 initializer=tf.compat.v1.constant_initializer(0.0),
-                                 dtype=tf.float32)
-        biases += tf.constant([1,0,0,0,1,0,0,0,1], dtype=tf.float32)
-        transform = tf.matmul(net, weights)
-        transform = tf.nn.bias_add(transform, biases)
-
-    transform = tf.reshape(transform, [batch_size, 3, K])
-    return transform
+from tf_util import conv1d_bn, dense_bn, OrthogonalRegularizer
 
 
-def feature_transform_net(inputs, is_training, bn_decay=None, K=64):
-    """ Feature Transform Net, input is BxNx1xK
-        Return:
-            Transformation matrix of size KxK """
-    batch_size = inputs.get_shape()[0].value
-    num_point = inputs.get_shape()[1].value
 
-    net = tf_util.conv2d(inputs, 64, [1,1],
-                         padding='VALID', stride=[1,1],
-                         bn=True, is_training=is_training,
-                         scope='tconv1', bn_decay=bn_decay)
-    net = tf_util.conv2d(net, 128, [1,1],
-                         padding='VALID', stride=[1,1],
-                         bn=True, is_training=is_training,
-                         scope='tconv2', bn_decay=bn_decay)
-    net = tf_util.conv2d(net, 1024, [1,1],
-                         padding='VALID', stride=[1,1],
-                         bn=True, is_training=is_training,
-                         scope='tconv3', bn_decay=bn_decay)
-    net = tf_util.max_pool2d(net, [num_point,1],
-                             padding='VALID', scope='tmaxpool')
+def orthogonal(l1=0.0, l2=0.0):
+    """
+    Functional wrapper for OrthogonalRegularizer.
+    :param l1: l1 penalty
+    :param l2: l2 penalty
+    :return: Orthogonal regularizer to append to a loss function
+    """
+    return OrthogonalRegularizer(l1, l2)
 
-    net = tf.reshape(net, [batch_size, -1])
-    net = tf_util.fully_connected(net, 512, bn=True, is_training=is_training,
-                                  scope='tfc1', bn_decay=bn_decay)
-    net = tf_util.fully_connected(net, 256, bn=True, is_training=is_training,
-                                  scope='tfc2', bn_decay=bn_decay)
+def transform_net(inputs, scope=None, regularize=False):
+    """
+    Generates an orthogonal transformation tensor for the input preprocessing
+    :param inputs: tensor with input image (either BxNxK or BxNx1xK)
+    :param scope: name of the grouping scope
+    :param regularize: enforce orthogonality constraint
+    :return: BxKxK tensor of the transformation
+    """
+    with K.name_scope(scope):
 
-    with tf.compat.v1.variable_scope('transform_feat') as sc:
-        weights = tf.compat.v1.get_variable('weights', [256, K*K],
-                                  initializer=tf.compat.v1.constant_initializer(0.0),
-                                  dtype=tf.float32)
-        biases = tf.compat.v1.get_variable('biases', [K*K],
-                                 initializer=tf.compat.v1.constant_initializer(0.0),
-                                 dtype=tf.float32)
-        biases += tf.constant(np.eye(K).flatten(), dtype=tf.float32)
-        transform = tf.matmul(net, weights)
-        transform = tf.nn.bias_add(transform, biases)
+        input_shape = inputs.get_shape().as_list()
+        k = input_shape[-1]
 
-    transform = tf.reshape(transform, [batch_size, K, K])
+        net = conv1d_bn(inputs, num_filters=64, kernel_size=1, padding='valid',
+                        use_bias=True, scope='tconv1')
+        net = conv1d_bn(net, num_filters=128, kernel_size=1, padding='valid',
+                        use_bias=True, scope='tconv2')
+        net = conv1d_bn(net, num_filters=1024, kernel_size=1, padding='valid',
+                        use_bias=True, scope='tconv3')
+
+        net = GlobalMaxPooling1D(data_format='channels_last')(net)
+
+        net = dense_bn(net, units=512, scope='tfc1', activation='relu')
+        net = dense_bn(net, units=256, scope='tfc2', activation='relu')
+
+        transform = Dense(units=k * k,
+                          kernel_initializer='zeros', bias_initializer=Constant(np.eye(k).flatten()),
+                          activity_regularizer=orthogonal(l2=0.001) if regularize else None)(net)
+        transform = Reshape((k, k))(transform)
+
     return transform
