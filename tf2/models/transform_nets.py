@@ -4,21 +4,12 @@ import sys
 import os
 from tensorflow.keras.layers import Dense, Reshape, GlobalMaxPooling1D
 from tensorflow.keras.initializers import Constant
+from tensorflow.keras import backend as K
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(BASE_DIR, '../utils'))
 from tf_util import conv1d_bn, dense_bn, OrthogonalRegularizer
 
-
-
-def orthogonal(l1=0.0, l2=0.0):
-    """
-    Functional wrapper for OrthogonalRegularizer.
-    :param l1: l1 penalty
-    :param l2: l2 penalty
-    :return: Orthogonal regularizer to append to a loss function
-    """
-    return OrthogonalRegularizer(l1, l2)
 
 def transform_net(inputs, scope=None, regularize=False):
     """
@@ -47,7 +38,7 @@ def transform_net(inputs, scope=None, regularize=False):
 
         transform = Dense(units=k * k,
                           kernel_initializer='zeros', bias_initializer=Constant(np.eye(k).flatten()),
-                          activity_regularizer=orthogonal(l2=0.001) if regularize else None)(net)
+                          activity_regularizer=None)(net) # OrthogonalRegularizer(l2=0.001) if regularize else
         transform = Reshape((k, k))(transform)
 
     return transform

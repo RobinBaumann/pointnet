@@ -3,6 +3,20 @@ from tensorflow.keras.utils import Sequence, to_categorical
 import open3d as o3d
 import os
 import pandas as pd
+import sys
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(BASE_DIR)
+# Download dataset for point cloud classification
+DATA_DIR = os.path.join(BASE_DIR, 'data')
+if not os.path.exists(DATA_DIR):
+    os.mkdir(DATA_DIR)
+if not os.path.exists(os.path.join(DATA_DIR, 'ModelNet10')):
+    www = 'http://3dvision.princeton.edu/projects/2014/3DShapeNets/ModelNet10.zip'
+    zipfile = os.path.basename(www)
+    os.system('wget %s; unzip %s' % (www, zipfile))
+    os.system('mv %s %s' % (zipfile[:-4], DATA_DIR))
+    os.system('rm %s' % (zipfile))
 
 
 class PointCloudProvider(Sequence):
@@ -35,13 +49,16 @@ class PointCloudProvider(Sequence):
         X = []
         y = []
         for i, row in batch_samples.iterrows():
-            mesh = o3d.io.read_triangle_mesh((row["path"]))
-            pcd = mesh.sample_points_uniformly(number_of_points=self.sample_size)
-            points = np.asarray(pcd.points)
-            centered_points = (points - points.mean(axis=0))
-            normalized_points = centered_points / centered_points.max()
-            X.append(normalized_points)
-            y.append(row["class"])
+            try:
+                mesh = o3d.io.read_triangle_mesh((row["path"]))
+                pcd = mesh.sample_points_uniformly(number_of_points=self.sample_size)
+                points = np.asarray(pcd.points)
+                centered_points = (points - points.mean(axis=0))
+                normalized_points = centered_points / centered_points.max()
+                X.append(normalized_points)
+                y.append(row["class"])
+            except:
+                continue
 
         return self.rotate_point_clouds(np.array(X)), to_categorical(np.array(y), num_classes=self.n_classes)
 
@@ -61,7 +78,7 @@ class PointCloudProvider(Sequence):
         return batch
 
     @staticmethod
-    def initialize_dataset(data_directory, file_extension=".off"):
+    def initialize_dataset():
         """
         Loads an index to all files and structures them.
         :param data_directory: directory containing the data files
@@ -69,10 +86,13 @@ class PointCloudProvider(Sequence):
         :return: pandas dataframe containing an index to all files and a label index,
             mapping numerical label representations to label names.
         """
+
+        data = os.path.join(DATA_DIR, "ModelNet10/")
+
         files = [
             os.path.join(r, f)
-            for r, d, fs in os.walk(data_directory)
-            for f in fs if f.endswith(file_extension)
+            for r, d, fs in os.walk(data)
+            for f in fs if f.endswith('.off')
         ]
 
         dataframe = pd.DataFrame({

@@ -14,12 +14,12 @@ class OrthogonalRegularizer(Regularizer):
     is orthogonal, i.e. ||X*X^T - I|| = 0. L1 and L2 penalties can be applied to it
     """
     def __init__(self, l1=0.0, l2=0.0):
-        self.l1 = K.cast_to_floatx(l1)
-        self.l2 = K.cast_to_floatx(l2)
+        self.l1 = l1
+        self.l2 = l2
 
     def __call__(self, x):
-        size = int(np.sqrt(x.shape[1].value))
-        assert size * size == x.shape[1].value
+        size = int(np.sqrt(x.shape[1]))
+        assert size * size == x.shape[1]
         x = K.reshape(x, (-1, size, size))
         xxt = K.batch_dot(x, x, axes=(2, 2))
         regularization = 0.0

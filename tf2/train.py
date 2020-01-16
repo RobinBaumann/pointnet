@@ -11,7 +11,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(BASE_DIR, 'models'))
 sys.path.append(os.path.join(BASE_DIR, 'utils'))
-import provider
+from provider import PointCloudProvider
 import tf_util
 
 parser = argparse.ArgumentParser()
@@ -46,8 +46,10 @@ os.system('cp train.py %s' % (LOG_DIR)) # bkp of train procedure
 CKPT_DIR = os.path.join(LOG_DIR, "ckpts")
 if not os.path.exists(CKPT_DIR): os.mkdir(CKPT_DIR)
 
-MAX_NUM_POINT = 2048
-NUM_CLASSES = 40
+MAX_NUM_POINT = 4096
+NUM_CLASSES = 10
+
+DATA_DIR = os.path.join(BASE_DIR, "data")
 
 BN_INIT_DECAY = 0.5
 BN_DECAY_DECAY_RATE = 0.5
@@ -55,12 +57,6 @@ BN_DECAY_DECAY_STEP = float(DECAY_STEP)
 BN_DECAY_CLIP = 0.99
 
 HOSTNAME = socket.gethostname()
-
-# ModelNet40 official train/test split
-TRAIN_FILES = provider.getDataFiles( \
-    os.path.join(BASE_DIR, 'data/modelnet40_ply_hdf5_2048/train_files.txt'))
-TEST_FILES = provider.getDataFiles(\
-    os.path.join(BASE_DIR, 'data/modelnet40_ply_hdf5_2048/test_files.txt'))
 
 
 def get_learning_rate_schedule():
@@ -82,32 +78,34 @@ def random_split(samples, atFraction):
 
 
 def train():
-    with tf.device('/gpu:'+str(GPU_INDEX)):
-        # Get model and loss
-        model = MODEL.get_model((None, 3), NUM_CLASSES)
-        # Get training operator
-        learning_rate = get_learning_rate_schedule()
-        optimizer = tf.keras.optimizers.Adam(learning_rate)
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(FLAGS.gpu)
 
-        samples = provider.initialize_segmentation_dataset(TRAIN_FILES)
+    # Get model and loss
+    model = MODEL.get_model((None, 3), NUM_CLASSES)
+    # Get training operator
+    learning_rate = get_learning_rate_schedule()
+    optimizer = tf.keras.optimizers.Adam(learning_rate)
+    df, l_idx = PointCloudProvider.initialize_dataset()
+    train_data, validation_data = random_split(df[df["is_train"]], 0.8)
+    print(len(train_data), len(validation_data))
+    generator_training = PointCloudProvider(train_data, BATCH_SIZE, n_classes=NUM_CLASSES,
+                                                      sample_size=MAX_NUM_POINT)
+    generator_validation = PointCloudProvider(validation_data, BATCH_SIZE,
+                                                        n_classes=NUM_CLASSES, sample_size=MAX_NUM_POINT)
 
-        train_data, validation_data = random_split(samples, 0.8)
+    print(len(generator_training), len(generator_validation))
+    callbacks = [
+        tf.keras.callbacks.TensorBoard(LOG_DIR, batch_size=BATCH_SIZE),
+        tf.keras.callbacks.ModelCheckpoint(CKPT_DIR, save_weights_only=False, save_best_only=True),
+    ]
+    model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['categorical_accuracy'])
+    model.fit_generator(generator=generator_training, validation_data=generator_validation,
+                        steps_per_epoch=len(generator_training),
+                        validation_steps=len(generator_validation),
+                        epochs=MAX_EPOCH, callbacks=callbacks, use_multiprocessing=False)
+    model.save("trained_model")
 
-        generator_training = provider.PointCloudProvider(train_data, BATCH_SIZE, augment=True, ndim=3,
-                                                          max_points=MAX_NUM_POINT)
-        generator_validation = provider.PointCloudProvider(validation_data, BATCH_SIZE, augment=True,
-                                                            ndim=3, max_points=MAX_NUM_POINT)
 
-        callbacks = [
-            tf.keras.callbacks.TensorBoard(LOG_DIR, batch_size=BATCH_SIZE),
-            tf.keras.callbacks.ModelCheckpoint(CKPT_DIR, save_weights_only=False, save_best_only=True),
-            tf.keras.callbacks.ReduceLROnPlateau(verbose=1)
-        ]
-
-        model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['categorical_accuracy'])
-        model.fit_generator(generator=generator_training, validation_data=generator_validation,
-                            steps_per_epoch=generator_training.n // BATCH_SIZE,
-                            validation_steps=generator_validation.n // BATCH_SIZE,
-                            epochs=MAX_EPOCH, callbacks=callbacks, use_multiprocessing=False)
-
-        model.save("trained_model")
+if __name__ == "__main__":
+    train()
