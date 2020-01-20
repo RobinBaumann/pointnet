@@ -1,18 +1,18 @@
 import numpy as np
 from tensorflow.keras.utils import Sequence, to_categorical
-import open3d as o3d
 import os
 import pandas as pd
+import h5py
 import sys
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 # Download dataset for point cloud classification
-DATA_DIR = os.path.join(BASE_DIR, 'data')
+DATA_DIR = os.path.join(BASE_DIR, "data")
 if not os.path.exists(DATA_DIR):
     os.mkdir(DATA_DIR)
-if not os.path.exists(os.path.join(DATA_DIR, 'ModelNet10')):
-    www = 'http://3dvision.princeton.edu/projects/2014/3DShapeNets/ModelNet10.zip'
+if not os.path.exists(os.path.join(DATA_DIR, 'modelnet40_ply_hdf5_2048')):
+    www = 'https://shapenet.cs.stanford.edu/media/modelnet40_ply_hdf5_2048.zip'
     zipfile = os.path.basename(www)
     os.system('wget %s; unzip %s' % (www, zipfile))
     os.system('mv %s %s' % (zipfile[:-4], DATA_DIR))
@@ -24,11 +24,21 @@ class PointCloudProvider(Sequence):
     Lazily load point clouds and annotations from filesystem and prepare it for model training.
     """
 
-    def __init__(self, dataset, batch_size, n_classes, sample_size):
-        self.dataset = dataset
+    def __init__(self, dataset, batch_size, n_classes, sample_size, task="classification"):
+        """
+        Instantiate a data provider instance for point cloud data.
+        Args:
+            dataset: pandas DataFrame containing the index to the files (train or test set)
+            batch_size: the desired batch size
+            n_classes: The number of different classes (needed for one-hot encoding of labels)
+            sample_size: the amount of points to sample per instance.
+            task: string denoting the tasks for which the data is to be loaded. Either "classification" (default) or "segmentaion".
+        """
+        self.dataset = np.asarray(dataset)
         self.batch_size = batch_size
         self.n_classes = n_classes
         self.sample_size = sample_size
+        self.task = task
 
         # indices of samples dictionary used for shuffling
         self.indices = np.arange(len(dataset))
@@ -41,26 +51,31 @@ class PointCloudProvider(Sequence):
     def __getitem__(self, index):
         """Generate one batch of data."""
         batch_indices = self.indices[index * self.batch_size: (index + 1) * self.batch_size]
-        batch_samples = self.dataset.iloc[batch_indices]
+        batch_samples = self.dataset[batch_indices]
 
         return self.__generate_data(batch_samples)
 
     def __generate_data(self, batch_samples):
         X = []
         y = []
-        for i, row in batch_samples.iterrows():
-            try:
-                mesh = o3d.io.read_triangle_mesh((row["path"]))
-                pcd = mesh.sample_points_uniformly(number_of_points=self.sample_size)
-                points = np.asarray(pcd.points)
-                centered_points = (points - points.mean(axis=0))
-                normalized_points = centered_points / centered_points.max()
-                X.append(normalized_points)
-                y.append(row["class"])
-            except:
-                continue
+        for row in batch_samples:
+            data = self.load_data_file(row)
+            if self.task == "classification":
+                points, label = data
+                points = self.sample_random_points(points)
+            else:
+                points, label, pid = data
+            centered_points = (points - points.mean(axis=0))
+            normalized_points = centered_points / centered_points.max()
+            X.append(normalized_points)
+            print(label)
+            y.append(label)
 
         return self.rotate_point_clouds(np.array(X)), to_categorical(np.array(y), num_classes=self.n_classes)
+
+    def sample_random_points(self, pc):
+        r_idx = np.random.randint(pc.shape[1], size=self.sample_size)
+        return np.take(pc, r_idx, axis=1)
 
     def on_epoch_end(self):
         """Shuffle training data, so batches are in different order"""
@@ -77,6 +92,25 @@ class PointCloudProvider(Sequence):
             batch[b, :, :3] = np.dot(pc[:, :3], R)
         return batch
 
+    def load_h5(self, h5_filename):
+        f = h5py.File(h5_filename)
+        data = f['data'][:]
+        label = f['label'][:]
+        return data, label
+
+    def load_data_file(self, filename):
+        if self.task == "classification":
+            return self.load_h5(filename)
+        else:
+            return self.load_h5_data_label_seg(filename)
+
+    def load_h5_data_label_seg(self, h5_filename):
+        f = h5py.File(h5_filename)
+        data = f['data'][:]
+        label = f['label'][:]
+        seg = f['pid'][:]
+        return data, label, seg
+
     @staticmethod
     def initialize_dataset():
         """
@@ -87,21 +121,10 @@ class PointCloudProvider(Sequence):
             mapping numerical label representations to label names.
         """
 
-        data = os.path.join(DATA_DIR, "ModelNet10/")
+        train_index = os.path.join(BASE_DIR, 'data/modelnet40_ply_hdf5_2048/train_files.txt')
+        test_index = os.path.join(BASE_DIR, 'data/modelnet40_ply_hdf5_2048/test_files.txt')
 
-        files = [
-            os.path.join(r, f)
-            for r, d, fs in os.walk(data)
-            for f in fs if f.endswith('.off')
-        ]
+        train_files = [line.rstrip() for line in open(train_index)]
+        test_files = [line.rstrip() for line in open(test_index)]
 
-        dataframe = pd.DataFrame({
-            "path": files,
-            "class": pd.Categorical([f.rsplit("/", 3)[1] for f in files]),
-            "is_train": ["train" in f for f in files]
-        })
-
-        factorization = dataframe["class"].factorize()
-        dataframe["class"] = factorization[0]
-
-        return dataframe, factorization[1]
+        return train_files, test_files

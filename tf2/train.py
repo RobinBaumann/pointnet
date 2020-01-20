@@ -47,9 +47,7 @@ CKPT_DIR = os.path.join(LOG_DIR, "ckpts")
 if not os.path.exists(CKPT_DIR): os.mkdir(CKPT_DIR)
 
 MAX_NUM_POINT = 4096
-NUM_CLASSES = 10
-
-DATA_DIR = os.path.join(BASE_DIR, "data")
+NUM_CLASSES = 40
 
 BN_INIT_DECAY = 0.5
 BN_DECAY_DECAY_RATE = 0.5
@@ -78,20 +76,29 @@ def random_split(samples, atFraction):
 
 
 def train():
-    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(FLAGS.gpu)
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    if gpus:
+        # Restrict TensorFlow to only allocate 1GB of memory on the first GPU
+        try:
+            tf.config.experimental.set_virtual_device_configuration(
+                gpus[FLAGS.gpu],
+                    [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=9536)])
+            logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+            print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+        except RuntimeError as e:
+            # Virtual devices must be set before GPUs have been initialized
+            print(e)
+
 
     # Get model and loss
     model = MODEL.get_model((None, 3), NUM_CLASSES)
     # Get training operator
     learning_rate = get_learning_rate_schedule()
     optimizer = tf.keras.optimizers.Adam(learning_rate)
-    df, l_idx = PointCloudProvider.initialize_dataset()
-    train_data, validation_data = random_split(df[df["is_train"]], 0.8)
-    print(len(train_data), len(validation_data))
-    generator_training = PointCloudProvider(train_data, BATCH_SIZE, n_classes=NUM_CLASSES,
+    train_files, test_files = PointCloudProvider.initialize_dataset()
+    generator_training = PointCloudProvider(train_files, BATCH_SIZE, n_classes=NUM_CLASSES,
                                                       sample_size=MAX_NUM_POINT)
-    generator_validation = PointCloudProvider(validation_data, BATCH_SIZE,
+    generator_validation = PointCloudProvider(test_files, BATCH_SIZE,
                                                         n_classes=NUM_CLASSES, sample_size=MAX_NUM_POINT)
 
     print(len(generator_training), len(generator_validation))
