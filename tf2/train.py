@@ -89,21 +89,18 @@ def train():
             # Virtual devices must be set before GPUs have been initialized
             print(e)
 
-
-    # Get model and loss
     model = MODEL.get_model((None, 3), NUM_CLASSES)
-    # Get training operator
+
     learning_rate = get_learning_rate_schedule()
     optimizer = tf.keras.optimizers.Adam(learning_rate)
-    train_files, test_files = PointCloudProvider.initialize_dataset()
-    generator_training = PointCloudProvider(train_files, BATCH_SIZE, n_classes=NUM_CLASSES,
-                                                      sample_size=MAX_NUM_POINT)
-    generator_validation = PointCloudProvider(test_files, BATCH_SIZE,
-                                                        n_classes=NUM_CLASSES, sample_size=MAX_NUM_POINT)
 
-    print(len(generator_training), len(generator_validation))
+    # initialize Dataset
+    PointCloudProvider.initialize_dataset()
+
+    generator_training = PointCloudProvider('train', BATCH_SIZE, n_classes=NUM_CLASSES, sample_size=MAX_NUM_POINT)
+    generator_validation = PointCloudProvider('test', BATCH_SIZE, n_classes=NUM_CLASSES, sample_size=MAX_NUM_POINT)
+
     callbacks = [
-        tf.keras.callbacks.TensorBoard(LOG_DIR, batch_size=BATCH_SIZE),
         tf.keras.callbacks.ModelCheckpoint(CKPT_DIR, save_weights_only=False, save_best_only=True),
     ]
     model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['categorical_accuracy'])
