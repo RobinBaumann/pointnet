@@ -42,4 +42,4 @@ def get_model(inputs):
     # add Maxpooling here, because it is needed in both nets.
     net = GlobalMaxPooling1D(data_format='channels_last', name='maxpool')(hx)
 
-    return net, net_transformed, hx, {'transform': ftransform}
+    return net, net_transformed

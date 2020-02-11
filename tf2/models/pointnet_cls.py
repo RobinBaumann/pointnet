@@ -21,7 +21,7 @@ def get_model(input_shape, classes, activation=None):
     assert K.image_data_format() == 'channels_last'
     # Generate input tensor and get base network
     inputs = Input(input_shape, name='Input_cloud')
-    maxpool, _, _, _ = pointnet_base.get_model(inputs)
+    maxpool, _ = pointnet_base.get_model(inputs)
 
     # Top layers
     if isinstance(classes, dict):

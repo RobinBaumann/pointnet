@@ -20,7 +20,7 @@ def get_model(input_shape, classes):
     assert K.image_data_format() == 'channels_last'
 
     inputs = Input(input_shape, name='Input_cloud')
-    net, local_features, _, _ = pointnet_base.get_model(inputs)
+    net, local_features = pointnet_base.get_model(inputs)
 
     global_feature_expanded = Lambda(K.expand_dims, arguments={'axis': 1})(net)
     global_feature_tiled = Lambda(K.tile, arguments={'n': [1, K.shape(local_features)[1], 1]})(global_feature_expanded)

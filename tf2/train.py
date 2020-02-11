@@ -76,19 +76,6 @@ def random_split(samples, atFraction):
 
 
 def train():
-    gpus = tf.config.experimental.list_physical_devices('GPU')
-    if gpus:
-        # Restrict TensorFlow to only allocate 1GB of memory on the first GPU
-        try:
-            tf.config.experimental.set_virtual_device_configuration(
-                gpus[FLAGS.gpu],
-                    [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=9536)])
-            logical_gpus = tf.config.experimental.list_logical_devices('GPU')
-            print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
-        except RuntimeError as e:
-            # Virtual devices must be set before GPUs have been initialized
-            print(e)
-
     model = MODEL.get_model((None, 3), NUM_CLASSES)
 
     learning_rate = get_learning_rate_schedule()
@@ -102,13 +89,15 @@ def train():
 
     callbacks = [
         tf.keras.callbacks.ModelCheckpoint(CKPT_DIR, save_weights_only=False, save_best_only=True),
+        tf.keras.callbacks.TensorBoard(LOG_DIR)
     ]
+
     model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['categorical_accuracy'])
     model.fit_generator(generator=generator_training, validation_data=generator_validation,
                         steps_per_epoch=len(generator_training),
                         validation_steps=len(generator_validation),
                         epochs=MAX_EPOCH, callbacks=callbacks, use_multiprocessing=False)
-    model.save("trained_model")
+    model.save("trained_model.pb")
 
 
 if __name__ == "__main__":
