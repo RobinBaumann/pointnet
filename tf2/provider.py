@@ -129,7 +129,7 @@ class PointCloudProvider(Sequence):
 
             for i, f in enumerate(files):
                 size = len(h5py.File(f, 'r')['data'])
-                start_idx = i*2048
+                start_idx = i*2048  # only the last chunk is smaller than 2048
                 end_idx = start_idx + size
                 vsource_points = h5py.VirtualSource(f, 'data', shape=(size, 2048, 3), maxshape=(out_size, 2048, 3))
                 vsource_label = h5py.VirtualSource(f, 'label', shape=(size, 1), maxshape=(out_size, 1))
